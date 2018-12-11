@@ -18,8 +18,22 @@ namespace azstore{
             }
             catch (AggregateException e)
             {
-                
-                throw;
+                throw e.InnerException ;
+            }
+        }
+
+        public static void EnsureNonNull<T>(T arg, string argname) {
+            if (null == arg)
+            {
+                throw new ArgumentNullException(argname);
+            }
+        }
+
+        public static void Ensure<T>(T arg, Predicate<T> validator, string errorMessage){
+            EnsureNonNull(errorMessage, "error message");
+            if (! validator(arg))
+            {
+                throw new ArgumentException(errorMessage);
             }
         }
 
