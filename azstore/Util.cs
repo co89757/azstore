@@ -1,6 +1,8 @@
 using System;
 using System.Threading.Tasks;
 using System.Threading;
+using Microsoft.WindowsAzure.Storage;
+
 namespace azstore{
 
     [AttributeUsage(AttributeTargets.Parameter)]
@@ -71,5 +73,46 @@ namespace azstore{
               }
             }            
         }
+
+        /// <summary>
+        /// Performs operation on a given Azure object. If the operation cannot be completed because of
+        /// a conflict on the server, it is repeated every 500 ms up to 15 minutes.
+        /// After 15 minutes an exception is thrown.
+        /// </summary>
+        public static void PerformAzureOperationWithTimeout<T>(Action<T> operation, T azureObject)
+        {
+            for (int i = 0; ; i++)
+            {
+                try
+                {
+                    operation(azureObject);
+                    break;
+                }
+                catch (StorageException exception)
+                {
+                    if (exception.RequestInformation.HttpStatusCode == (int)System.Net.HttpStatusCode.Conflict)
+                    {
+                        if (i == 0)
+                        {
+                            
+                        }
+                        else if (i >= (15 * 60 * 1000 / 500)) // 15 minutes
+                        {                             
+                            throw;
+                        }
+
+                        // this object is being deleted, wait and try again
+                        System.Threading.Thread.Sleep(500);
+                    }
+                    else
+                    {
+                        // there is other unknown problem
+                        throw;
+                    }
+                }
+            }
+        }
+
+         
     }
 }
