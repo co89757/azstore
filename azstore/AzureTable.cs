@@ -6,6 +6,7 @@ using System.Net;
 using System.Text;
 using System.Threading.Tasks;
 using System.Linq;
+
 namespace azstore
 {
     public enum Result
@@ -37,7 +38,7 @@ namespace azstore
 
         private EntityBinder<T> binder;
         private CloudTable table;
-
+       
         public AzureTable(string name, string connectionstring) : this(name, connectionstring, new EntityBinder<T>()) { }
         public AzureTable(string name, string conn, EntityBinder<T> binder)
         {
@@ -45,7 +46,7 @@ namespace azstore
             var account = CloudStorageAccount.Parse(conn);
             var tblClient = account.CreateCloudTableClient();
             this.table = tblClient.GetTableReference(this.Name);
-            table.CreateIfNotExistsAsync().Wait();
+            Util.Syncify(()=>table.CreateIfNotExistsAsync());
             this.binder = binder;
         }
 
@@ -136,7 +137,21 @@ namespace azstore
 
             return result;
         }
+
+        public static string BuildPointQuery(string partitionKey, string rowkey){
+            string q1 = TableQuery.GenerateFilterCondition("PartitionKey", QueryComparisons.Equal, partitionKey);
+            string q2 = TableQuery.GenerateFilterCondition("RowKey", QueryComparisons.Equal, rowkey);
+            return TableQuery.CombineFilters(q1, TableOperators.And, q1);
+        }
         
+        public static string BuildRangeQuery(string partitionKey, string rowkeyUpper, string rowkeyLower){
+            string q1 = TableQuery.GenerateFilterCondition("PartitionKey", QueryComparisons.Equal, partitionKey);
+            string q2 = TableQuery.GenerateFilterCondition("RowKey", QueryComparisons.LessThan, rowkeyUpper);
+            string q3 = TableQuery.GenerateFilterCondition("RowKey", QueryComparisons.GreaterThan, rowkeyLower);
+            var qq = TableQuery.CombineFilters(q1, TableOperators.And, q2);
+            var q = TableQuery.CombineFilters(qq, TableOperators.And, q3);
+            return q;
+        }
 
         public async Task<Result> DeleteAsync(T element){
             var boundEntity = binder.Write(element);
@@ -174,7 +189,6 @@ namespace azstore
                     return Result.FailedBecauseUpdated;
                 throw new Exception($"table delete operation failed against {table.Uri}", e);
             }
-         
         }
     }
 }
