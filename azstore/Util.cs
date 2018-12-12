@@ -12,18 +12,15 @@ namespace azstore{
 
     public static class Util{
 
-        public static T Syncify<T>(this Task<T> wrapee){
-            try
-            {
-                wrapee.Wait();
-                return wrapee.Result;
-            }
-            catch (AggregateException e)
-            {
-                throw e.InnerException ;
-            }
-        }
+        public static T Syncify<T>(Func<Task<T>> fn ) => Task.Factory.StartNew(fn)
+                                                            .Unwrap()
+                                                            .GetAwaiter()
+                                                            .GetResult();
 
+        public static void Syncify(Func<Task> fn) => Task.Factory.StartNew(fn)
+                                                            .Unwrap()
+                                                            .GetAwaiter()
+                                                            .GetResult();
         public static void EnsureNonNull<T>(T arg, string argname) {
             if (null == arg)
             {
