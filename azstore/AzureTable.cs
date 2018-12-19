@@ -8,29 +8,30 @@ using Microsoft.WindowsAzure.Storage;
 using Microsoft.WindowsAzure.Storage.Table;
 
 namespace azstore {
-  public enum Result {
-    /// <summary>
-    /// Table operation successfully completed.
-    /// </summary>
-    Ok = 0,
+  public class Result{
+    public object Data { get; set; }
+    public int HttpStatus { get; set; }
+    public bool Ok => HttpStatus <= 299 && HttpStatus >= 200 ;
+    public static Result EmptyOk = new Result{HttpStatus = (int) HttpStatusCode.OK };
+    public static Result OkWithData(object data) => new Result{Data = data, HttpStatus = (int) HttpStatusCode.OK };
 
-    /// <summary>
-    /// Table operation did not complete because the row was updated by another table instance.
-    /// </summary>
-    FailedBecauseUpdated = 1,
+    public static Result Error(HttpStatusCode code){
+      return new Result{HttpStatus = (int) code};
+    }
 
-    /// <summary>
-    /// Table operation could not find the row to which it was applied.
-    /// </summary>
-    NotFound = 2,
-
-    /// <summary>
-    /// One or more of values to SetValue call exceeded the column size limitation.
-    /// </summary>
-    SizeExceeded = 3,
+    public static Result Error(int code){
+      return new Result{HttpStatus = code};
+    }
   }
 
-  public class AzureTable<T> where T : IDataEntity, new() {
+  public class Result<T>{
+    public T Data { get; set; }
+    public int HttpStatus { get; set; }
+    public bool Ok => HttpStatus <= 299 && HttpStatus >= 200 ;
+    public static Result<T> OkWithData(T data) => new Result<T>{Data = data, HttpStatus = (int) HttpStatusCode.OK };
+  }
+
+  public class AzureTable<T> where T : class, IDataEntity, new() {
     public string Name { get; set; }
 
     private EntityBinder<T> binder;
@@ -50,27 +51,26 @@ namespace azstore {
       var e = binder.Write(data);
       TableOperation operation = TableOperation.InsertOrReplace(e);
       try {
-        await table.ExecuteAsync(operation);
-        return Result.Ok;
+        var r = await table.ExecuteAsync(operation);
+        return new Result{HttpStatus = r.HttpStatusCode};
       } catch (StorageException ex) {
 
         switch ((HttpStatusCode)ex.RequestInformation.HttpStatusCode) {
           case HttpStatusCode.Conflict:
             // Returned by Insert if it fails because the row already exists.
-            return Result.FailedBecauseUpdated;
           case HttpStatusCode.PreconditionFailed:
             // Returned by Replace if it fails because the ETAG doesn't match (got modified by someone else).
-            return Result.FailedBecauseUpdated;
+            return Result.Error(ex.RequestInformation.HttpStatusCode);
           default:
             throw new InvalidOperationException($"table operation failed against {table.Uri}", ex);
         }
       }
     }
 
-    public async Task<Result> InsertAll(IEnumerable<T> data) {
+    public async Task<Result> InsertOrReplaceAll(IEnumerable<T> data) {
       Util.Ensure(data, x => x.Count()< 100, "one batch operation can hold at most 100 entities");
       if (data.Count()== 0) {
-        return Result.Ok;
+        return new Result{HttpStatus = (int) HttpStatusCode.OK};
       }
       TableBatchOperation batch = new TableBatchOperation();
       var pk = data.First().GetPartitionKey();
@@ -82,10 +82,42 @@ namespace azstore {
         batch.InsertOrReplace(bound);
       }
       var res = await table.ExecuteBatchAsync(batch);
-      return Result.Ok;
+      return Result.EmptyOk;
     }
 
-    public async Task<IEnumerable<T>> RetrieveByPartition(string partitionName) {
+    public async Task<Result> MergeOne(T data){
+      Util.EnsureNonNull(data, nameof(data));
+      var dte = binder.Write(data);
+      dte.ETag = "*";
+      TableOperation mergeOp = TableOperation.Merge(dte);
+      var r = await table.ExecuteAsync(mergeOp);
+      return new Result{HttpStatus = r.HttpStatusCode};
+    }
+
+    public async Task<Result> MergeOne(string pk, string rk, IDictionary<string, object> props){
+      var dte = new DynamicTableEntity(pk, rk){ETag = "*"};
+      foreach (var kv in props)
+      {
+          dte.Properties.Add(kv.Key, EntityProperty.CreateEntityPropertyFromObject(kv.Value));
+      }
+      var op = TableOperation.Merge(dte);
+      try
+      {
+          var r = await table.ExecuteAsync(op);
+          return Result.EmptyOk;
+      }
+      catch (StorageException ex)
+      {
+          int status = ex.RequestInformation.HttpStatusCode;
+          if(status == (int) HttpStatusCode.PreconditionFailed ||
+            status == (int) HttpStatusCode.Conflict
+          )
+            return Result.Error(status);
+          throw;
+      }
+    }
+
+    public async Task<Result<IEnumerable<T>>> RetrieveByPartition(string partitionName) {
 
       Util.EnsureNonNull(partitionName, "partitionName");
       TableQuery<DynamicTableEntity> q = new TableQuery<DynamicTableEntity>()
@@ -95,15 +127,15 @@ namespace azstore {
       do {
         TableQuerySegment<DynamicTableEntity> segment =
           await table.ExecuteQuerySegmentedAsync(q, continuationToken);
+        
         continuationToken = segment.ContinuationToken;
         result.AddRange(segment.Results.Select(x => binder.Read(x)));
       } while (continuationToken != null);
 
-      return result;
-
+      return Result<IEnumerable<T>>.OkWithData(result);
     }
 
-    public async Task<IEnumerable<T>> RetrieveByQuery(string query) {
+    public async Task<Result<IEnumerable<T>>> RetrieveByQuery(string query) {
       Util.EnsureNonNull(query, "query");
       TableQuery<DynamicTableEntity> q = new TableQuery<DynamicTableEntity>()
         .Where(query);
@@ -119,7 +151,16 @@ namespace azstore {
 
       } while (continuationToken != null);
 
-      return result;
+      return Result<IEnumerable<T>>.OkWithData(result);
+    }
+
+    public async Task<Result<T>> RetrieveOne(string partitionKey, string rowkey){
+      Util.EnsureNonNull(partitionKey, nameof(partitionKey));
+      Util.EnsureNonNull(rowkey, nameof(rowkey));
+      TableOperation op = TableOperation.Retrieve<DynamicTableEntity>(partitionKey, rowkey);
+      var res = await table.ExecuteAsync(op);
+      var clientEntity = binder.Read( (DynamicTableEntity) res.Result);
+      return new Result<T>{Data = clientEntity, HttpStatus = res.HttpStatusCode};
     }
 
     public static string BuildPointQuery(string partitionKey, string rowkey) {
@@ -142,13 +183,14 @@ namespace azstore {
       TableOperation op = TableOperation.Delete(boundEntity);
       try {
         var res = await table.ExecuteAsync(op);
-        return Result.Ok;
+        return Result.EmptyOk;
       } catch (StorageException e) {
         int statuscode = e.RequestInformation.HttpStatusCode;
-        if (statuscode == (int)HttpStatusCode.NotFound)
-          return Result.NotFound;
-        if (statuscode == (int)HttpStatusCode.Conflict || (int)HttpStatusCode.PreconditionFailed == statuscode)
-          return Result.FailedBecauseUpdated;
+        if(statuscode == (int)HttpStatusCode.NotFound || 
+          statuscode == (int)HttpStatusCode.Conflict ||
+          statuscode == (int)HttpStatusCode.PreconditionFailed
+         )
+         return Result.Error(statuscode);
         throw e;
       }
     }
@@ -157,14 +199,15 @@ namespace azstore {
       var entity = new TableEntity(partitionKey, rowkey) { ETag = "*" };
       try {
         await table.ExecuteAsync(TableOperation.Delete(entity));
-        return Result.Ok;
+        return Result.EmptyOk;
       } catch (StorageException e) {
         int statuscode = e.RequestInformation.HttpStatusCode;
-        if (statuscode == (int)HttpStatusCode.NotFound)
-          return Result.NotFound;
-        if (statuscode == (int)HttpStatusCode.Conflict || (int)HttpStatusCode.PreconditionFailed == statuscode)
-          return Result.FailedBecauseUpdated;
-        throw new Exception($"table delete operation failed against {table.Uri}", e);
+        if(statuscode == (int)HttpStatusCode.NotFound || 
+          statuscode == (int)HttpStatusCode.Conflict ||
+          statuscode == (int)HttpStatusCode.PreconditionFailed
+         )
+         return Result.Error(statuscode);
+        throw e;
       }
     }
   }

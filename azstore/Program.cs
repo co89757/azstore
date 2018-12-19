@@ -1,5 +1,6 @@
 ﻿using System;
-
+using System.Collections.Generic;
+using Microsoft.Extensions.Configuration;
 namespace azstore
 {
     class Program
@@ -13,7 +14,8 @@ namespace azstore
             public int Type { get; set; }
             [TableColumn("When")]
             public DateTimeOffset When { get; set; }
-
+            [TableColumn("Age")]    
+            public int Age { get; set; }
             public string GetRowKey()
             {
                 return Name;
@@ -25,20 +27,24 @@ namespace azstore
             }
         }
 
+
         static void Main(string[] args)
         {
-            var conn = Environment.GetEnvironmentVariable("AZSTORE__CONNECTION");
-              
+            var cfg = new ConfigurationBuilder()
+            .SetBasePath(System.IO.Directory.GetCurrentDirectory())
+            .AddJsonFile("./appsettings.json")
+            .Build();
+            var conn = cfg.GetSection("azure")["connection"];
             var tab = new AzureTable<TestEntity>("testtable", conn );
-            var r= tab.InsertOrReplaceAsync(new TestEntity() {Name = "colin", Type = 2, When = DateTimeOffset.Now}).ConfigureAwait(false).GetAwaiter().GetResult();
-            if ( r != Result.Ok)
-            {
-                Console.WriteLine("Error: {0}", r);
-            }
-            else
-            {
-                Console.WriteLine("==OK==");
-            }
+            string rk = "129f01a8-7528-4f05-b3aa-d05c78bbb26a";
+            string pk = "4";
+            Dictionary<string,object> props = new Dictionary<string, object>(){
+                {"Age", 50}
+            };
+            var res = tab.MergeOne(pk, rk, props).ConfigureAwait(false).GetAwaiter().GetResult();
+
+             
+            System.Console.WriteLine($"result: {res.HttpStatus} "); 
         }
     }
 }
