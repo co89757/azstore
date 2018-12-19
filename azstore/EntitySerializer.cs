@@ -4,8 +4,10 @@ using System.Reflection;
 using System.Text;
 using Microsoft.WindowsAzure.Storage.Table;
 namespace azstore {
-    public class EntityBinder<T> where T : IDataEntity, new() {
+    public class EntityBinder<T> where T : class, IDataEntity, new() {
         public virtual DynamicTableEntity Write(T data) {
+            if(data == null)
+                return null;
             DynamicTableEntity e = new DynamicTableEntity(data.GetPartitionKey(), data.GetRowKey());
             foreach (var propInfo in typeof(T).GetProperties()) {
                 var tblColumnAttr = propInfo.GetCustomAttribute<TableColumnAttribute>();
@@ -21,7 +23,7 @@ namespace azstore {
 
         public virtual T Read(DynamicTableEntity e) {
             if (e == null) {
-                throw new ArgumentNullException("entity");
+                return null;
             }
 
             T data = new T();
