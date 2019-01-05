@@ -14,6 +14,7 @@ namespace azstore {
     public bool Ok => HttpStatus <= 299 && HttpStatus >= 200 ;
     public static Result EmptyOk = new Result{HttpStatus = (int) HttpStatusCode.OK };
     public static Result OkWithData(object data) => new Result{Data = data, HttpStatus = (int) HttpStatusCode.OK };
+    public static Result NotFound() => new Result{HttpStatus = (int) HttpStatusCode.NotFound };
 
     public static Result Error(HttpStatusCode code){
       return new Result{HttpStatus = (int) code};
@@ -29,6 +30,7 @@ namespace azstore {
     public int HttpStatus { get; set; }
     public bool Ok => HttpStatus <= 299 && HttpStatus >= 200 ;
     public static Result<T> OkWithData(T data) => new Result<T>{Data = data, HttpStatus = (int) HttpStatusCode.OK };
+    public static Result<T> NotFound() => new Result<T>{HttpStatus = (int) HttpStatusCode.NotFound };
   }
 
   public class AzureTable<T> where T : class, IDataEntity, new() {
@@ -73,7 +75,7 @@ namespace azstore {
         return new Result{HttpStatus = (int) HttpStatusCode.OK};
       }
       TableBatchOperation batch = new TableBatchOperation();
-      var pk = data.First().GetPartitionKey();
+      var pk = data.First().PartitionKey;
       foreach (var d in data) {
         var bound = this.binder.Write(d);
         if (pk != bound.PartitionKey) {
@@ -154,6 +156,26 @@ namespace azstore {
       return Result<IEnumerable<T>>.OkWithData(result);
     }
 
+    public async Task<Result<List<U>>> RetrieveByQueryPartial<U>(string query, EntityResolver<U> resolver){
+      Util.EnsureNonNull(query, "query");
+      TableQuery<DynamicTableEntity> q = new TableQuery<DynamicTableEntity>()
+        .Where(query);
+      var result = new List<U>();
+       
+      TableContinuationToken continuationToken = null;
+      do {
+        TableQuerySegment<U> segment =
+          await table.ExecuteQuerySegmentedAsync(q, resolver,  continuationToken);
+        continuationToken = segment.ContinuationToken;
+        foreach (var t in segment.Results) {
+          result.Add(t);
+        }
+
+      } while (continuationToken != null);
+
+      return Result<List<U>>.OkWithData(result);
+    }
+
     public async Task<Result<T>> RetrieveOne(string partitionKey, string rowkey){
       Util.EnsureNonNull(partitionKey, nameof(partitionKey));
       Util.EnsureNonNull(rowkey, nameof(rowkey));
@@ -161,6 +183,16 @@ namespace azstore {
       var res = await table.ExecuteAsync(op);
       var clientEntity = binder.Read( (DynamicTableEntity) res.Result);
       return new Result<T>{Data = clientEntity, HttpStatus = res.HttpStatusCode};
+    }
+    
+    public async Task<Result<U>> RetrieveOnePartial<U>(string partitionKey, string rowkey, EntityResolver<U> resolver){
+      string query = BuildPointQuery(partitionKey, rowkey);
+      var result = await RetrieveByQueryPartial(query, resolver);
+      if (result.Data.Count == 0)
+      {
+          return Result<U>.NotFound();
+      }
+      return Result<U>.OkWithData(result.Data.Single());
     }
 
     public static string BuildPointQuery(string partitionKey, string rowkey) {

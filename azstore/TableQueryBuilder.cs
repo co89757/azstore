@@ -80,6 +80,13 @@ namespace azstore {
       query.AppendFormat("{0} lt '{1}'", propertyName, value);
       return this;
     }
+
+    public TableQueryBuilder Ago(TimeSpan ago  ){
+      DateTimeOffset now = DateTimeOffset.UtcNow;
+      var cutoff = now.Add(ago.Negate());
+      return GreaterThan("Timestamp", cutoff);
+    }
+    
     public TableQueryBuilder IsTrue(string propertyName) {
       query.Append(propertyName);
       return this;

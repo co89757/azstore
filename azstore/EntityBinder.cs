@@ -8,7 +8,7 @@ namespace azstore {
         public virtual DynamicTableEntity Write(T data) {
             if (data == null)
                 return null;
-            DynamicTableEntity e = new DynamicTableEntity(data.GetPartitionKey(), data.GetRowKey());
+            DynamicTableEntity e = new DynamicTableEntity(data.PartitionKey, data.RowKey);
             foreach (var propInfo in typeof(T).GetProperties()) {
                 var tblColumnAttr = propInfo.GetCustomAttribute<TableColumnAttribute>();
                 if (tblColumnAttr != null) {
@@ -32,6 +32,8 @@ namespace azstore {
             }
 
             T data = new T();
+            data.PartitionKey = e.PartitionKey;
+            data.RowKey = e.RowKey;
             foreach (var propInfo in typeof(T).GetProperties()) {
                 var tblColumnAttr = propInfo.GetCustomAttribute<TableColumnAttribute>();
                 if (tblColumnAttr != null) {

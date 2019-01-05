@@ -26,13 +26,9 @@ namespace azstore {
 
             [TableColumn("Age")]
             public int Age { get; set; }
-            public string GetRowKey() {
-                return Name;
-            }
-
-            public string GetPartitionKey() {
-                return Type.ToString();
-            }
+            
+            public string  RowKey { get => Name; set => Name = value; }
+            public string  PartitionKey { get => Type.ToString(); set => Type = int.Parse(value); }
         }
 
         static void Main(string[] args) {
@@ -53,9 +49,10 @@ namespace azstore {
                 When = DateTimeOffset.UtcNow
             };
 
-            var result = tab.InsertOrReplaceAsync(testent).GetAwaiter().GetResult();
+            var rk = "038e1d11-2a1f-4fa1-9485-29e418dce8b0";
+            var result = tab.RetrieveOnePartial<int?>("2",rk, (prk, rowk, ts, props, etag)=> props.ContainsKey("Age")? props["Age"].Int32Value : 0  ).GetAwaiter().GetResult();
 
-            System.Console.WriteLine($"insert result: {result.HttpStatus} ");
+            System.Console.WriteLine($"insert result: {result.HttpStatus} result data: {result.Data} ");
 
             var entback = tab.RetrieveOne(pk.ToString(), eid).GetAwaiter().GetResult().Data;
             System.Console.WriteLine($"returned entity, jtype = {entback.JobType}");

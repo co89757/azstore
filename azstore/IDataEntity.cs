@@ -6,7 +6,7 @@ namespace azstore
 {
     public interface IDataEntity
     {
-          string GetRowKey();
-          string GetPartitionKey();
+        string RowKey{get;set;}
+        string PartitionKey {get;set;}
     }
 }
