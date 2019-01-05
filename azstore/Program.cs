@@ -1,50 +1,64 @@
 ﻿using System;
 using System.Collections.Generic;
 using Microsoft.Extensions.Configuration;
-namespace azstore
-{
-    class Program
-    {
-        public class TestEntity : IDataEntity
-        {
+using Microsoft.Extensions.Configuration.EnvironmentVariables;
+namespace azstore {
+    class Program {
+
+        public enum JType {
+            Ok,
+            Fail,
+            Nil
+        }
+
+        public class TestEntity : IDataEntity {
             [TableColumn("Name")]
             public string Name { get; set; }
 
             [TableColumn("Type")]
             public int Type { get; set; }
+
             [TableColumn("When")]
             public DateTimeOffset When { get; set; }
-            [TableColumn("Age")]    
+
+            [TableColumn("JobType")]
+            public JType JobType { get; set; }
+
+            [TableColumn("Age")]
             public int Age { get; set; }
-            public string GetRowKey()
-            {
+            public string GetRowKey() {
                 return Name;
             }
 
-            public string GetPartitionKey()
-            {
+            public string GetPartitionKey() {
                 return Type.ToString();
             }
         }
 
-
-        static void Main(string[] args)
-        {
+        static void Main(string[] args) {
             var cfg = new ConfigurationBuilder()
-            .SetBasePath(System.IO.Directory.GetCurrentDirectory())
-            .AddJsonFile("./appsettings.json")
-            .Build();
+                .SetBasePath(System.IO.Directory.GetCurrentDirectory())
+                .AddJsonFile("./appsettings.json")
+                .AddEnvironmentVariables()
+                .Build();
             var conn = cfg.GetSection("azure")["connection"];
-            var tab = new AzureTable<TestEntity>("testtable", conn );
-            string rk = "129f01a8-7528-4f05-b3aa-d05c78bbb26a";
-            string pk = "4";
-            Dictionary<string,object> props = new Dictionary<string, object>(){
-                {"Age", 50}
+            var tab = new AzureTable<TestEntity>("testtable", conn);
+            var eid = Guid.NewGuid().ToString();
+            var pk = 2;
+            var testent = new TestEntity {
+                Name = eid,
+                Age = 30,
+                Type = pk,
+                JobType = JType.Fail,
+                When = DateTimeOffset.UtcNow
             };
-            var res = tab.MergeOne(pk, rk, props).ConfigureAwait(false).GetAwaiter().GetResult();
 
-             
-            System.Console.WriteLine($"result: {res.HttpStatus} "); 
+            var result = tab.InsertOrReplaceAsync(testent).GetAwaiter().GetResult();
+
+            System.Console.WriteLine($"insert result: {result.HttpStatus} ");
+
+            var entback = tab.RetrieveOne(pk.ToString(), eid).GetAwaiter().GetResult().Data;
+            System.Console.WriteLine($"returned entity, jtype = {entback.JobType}");
         }
     }
 }
